@@ -20,6 +20,7 @@ done
 xcrun lipo -create "$staging/NiuMa-arm64" "$staging/NiuMa-x86_64" -output "$app/Contents/MacOS/NiuMa"
 cp macos/Info.plist "$app/Contents/Info.plist"
 cp beij.png "$app/Contents/Resources/beij.png"
+cp data/china-work-calendar.txt "$app/Contents/Resources/china-work-calendar.txt"
 cp LICENSE "$app/Contents/Resources/LICENSE.txt"
 mkdir -p "$staging/AppIcon.iconset"
 sips -s format png src/app.ico --out "$staging/icon.png" >/dev/null

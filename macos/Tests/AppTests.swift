@@ -120,6 +120,24 @@ struct AppTests {
         check(saved.monthDays == 21.75 && saved.lunchStart == "12:00" && saved.overtimeRate == 1.5, "disabled invalid fields preserve stored values")
         check(controller.settings.masked && controller.settings.clickThrough, "saving retains runtime toggles")
 
+        var savedHuawei: AppSettings?
+        let huaweiEditor = SettingsWindow(settings: saved) { settings, _ in savedHuawei = settings }
+        let huaweiControls = descendants(huaweiEditor.window!.contentView!)
+        let huaweiMode = huaweiControls.compactMap { $0 as? NSPopUpButton }.first { $0.identifier?.rawValue == "salaryMode" }!
+        let baseSalary = huaweiEditor.fields["huaweiBaseSalary"]!
+        check(baseSalary.isHiddenOrHasHiddenAncestor, "Huawei fields are concealed in standard salary mode")
+        huaweiMode.selectItem(at: 2)
+        huaweiMode.sendAction(huaweiMode.action, to: huaweiMode.target)
+        check(!baseSalary.isHiddenOrHasHiddenAncestor && huaweiEditor.fields["payDay"]!.isHiddenOrHasHiddenAncestor, "Huawei mode reveals pay inputs and replaces the fixed payday input")
+        baseSalary.stringValue = "21000"
+        huaweiEditor.fields["huaweiPerformanceSalary"]!.stringValue = "4200"
+        huaweiEditor.fields["huaweiAnnualBonus"]!.stringValue = ""
+        huaweiEditor.fields["huaweiMonthDays"]!.stringValue = "20"
+        huaweiEditor.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: baseSalary))
+        let huaweiPreview = huaweiControls.compactMap { $0 as? NSTextField }.first { $0.identifier?.rawValue == "calculationPreview" }!
+        check(huaweiPreview.stringValue.contains("1260.00") && huaweiPreview.stringValue.contains("2100.00"), "Huawei settings preview shows regular and double rates")
+        check(huaweiEditor.saveDraft() && savedHuawei?.usesHuaweiPayroll == true && savedHuawei?.huaweiAnnualBonus == 0 && savedHuawei?.huaweiMonthDays == 20, "Huawei settings save with blank annual bonus and a manual divisor")
+
         controller.openSettings(nil)
         let statusEditor = controller.settingsWindow!
         let statusControls = descendants(statusEditor.window!.contentView!)

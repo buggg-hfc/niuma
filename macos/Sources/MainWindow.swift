@@ -304,8 +304,16 @@ final class MainView: NSView {
         progress.doubleValue = snapshot.progress
         labels["monthValue"]?.stringValue = money(engine.monthEarned(settings, at: now, todayEarned: snapshot.earned))
         let payday = engine.daysToPayDay(settings, at: now)
-        labels["monthSub"]?.stringValue = "本月满勤约 \(money(engine.monthTotal(settings, at: now), 0)) · " + (payday == 0 ? "今天发工资" : "\(payday) 天后发薪") + "\n历史工作日按满勤估算"
-        labels["hourly"]?.stringValue = "时薪 \(money(snapshot.hourlyPay)) · 今日满勤 \(money(snapshot.dailyPay))" + (snapshot.state == .overtime ? "\n加班按 \(settings.overtimeRate) 倍计薪" : "")
+        let monthNote = settings.usesHuaweiPayroll && !engine.huaweiPayroll.hasOfficialSchedule(for: now)
+            ? "节假日暂按每周排班估算" : "历史工作日按满勤估算"
+        labels["monthSub"]?.stringValue = "本月满勤约 \(money(engine.monthTotal(settings, at: now), 0)) · " + (payday == 0 ? "今天发工资" : "\(payday) 天后发薪") + "\n" + monthNote
+        var hourly = "时薪 \(money(snapshot.hourlyPay)) · 今日满勤 \(money(snapshot.dailyPay))"
+        if snapshot.huaweiDoublePay {
+            hourly += "\n月末周六 · 基础日薪 × 2"
+        } else if snapshot.state == .overtime {
+            hourly += "\n加班按 \(settings.overtimeRate) 倍计薪"
+        }
+        labels["hourly"]?.stringValue = hourly
         if now.timeIntervalSince(quoteAt) >= 600 { quoteIndex += 1; quoteAt = now }
         let quotes = settings.quoteList
         quoteButton.title = quotes.isEmpty ? "" : quotes[quoteIndex % quotes.count]

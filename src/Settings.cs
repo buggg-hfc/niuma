@@ -9,10 +9,16 @@ namespace NiuMa
 {
     public class AppSettings
     {
+        internal const int HuaweiSalaryMode = 2;
+
         public string AppName = "牛马脱敏器";
-        public int SalaryMode = 0;          // 0 日薪, 1 月薪
+        public int SalaryMode = 0;          // 0 日薪, 1 月薪, 2 华为
         public double Amount = 100;
         public double MonthDays = 21.75;
+        public double HuaweiBasePay;
+        public double HuaweiPerformancePay;
+        public double HuaweiAnnualBonus;
+        public double HuaweiMonthDays;     // 0 = 按当月正常工作日计算
         public string StartTime = "10:00";
         public string EndTime = "19:00";
         public bool LunchEnabled = false;

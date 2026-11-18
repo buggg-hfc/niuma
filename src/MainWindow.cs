@@ -364,9 +364,10 @@ namespace NiuMa
                 bool work = Engine.IsWorkDay(_s, Now());
                 cm.Items.Add(Item(work ? "今天请假/休息（不计薪）" : "今天要上班（计薪）", () =>
                 {
-                    bool normal = _s.WorkDaySet()[(int)Now().DayOfWeek];
-                    bool target = !work;
-                    _s.OverrideDate = Engine.DateKey(Now());
+                    var today = Now();
+                    bool normal = Engine.IsScheduledWorkDay(_s, today);
+                    bool target = !Engine.IsWorkDay(_s, today);
+                    _s.OverrideDate = Engine.DateKey(today);
                     _s.OverrideMode = target == normal ? 0 : (target ? 2 : 1);
                     _s.Save(); _lastState = null; Tick(true);
                 }));
@@ -464,6 +465,7 @@ namespace NiuMa
             var r = Engine.Compute(_s, now);
             _snap = r;
             string c = _s.Currency;
+            Func<double, string, string> payText = (amount, format) => _s.Masked ? "****" : c + amount.ToString(format);
 
             _clock.Text = now.ToString("yyyy-MM-dd") + "  " + Week[(int)now.DayOfWeek] + "  " + now.ToString("HH:mm:ss");
             string countdown;
@@ -486,8 +488,10 @@ namespace NiuMa
             _miniDot.Background = color;
 
             int dec = Math.Max(2, Math.Min(6, _s.Decimals));
-            _speed.Text = r.Speed > 0 ? "当前赚钱速度  " + c + r.Speed.ToString("F" + dec) + " / 秒  ·  " + c + (r.Speed * 60).ToString("F2") + " / 分钟" : "当前赚钱速度  " + c + "0 / 秒（暂停计薪）";
-            _wish.Text = Engine.WishText(_s, r);
+            _speed.Text = r.Speed > 0
+                ? "当前赚钱速度  " + payText(r.Speed, "F" + dec) + " / 秒  ·  " + payText(r.Speed * 60, "F2") + " / 分钟"
+                : "当前赚钱速度  " + payText(0, "0") + " / 秒（暂停计薪）";
+            _wish.Text = _s.Masked ? "金额已隐藏，安心搬砖。" : Engine.WishText(_s, r);
             _progressText.Text = "今日工时进度 " + (r.Progress * 100).ToString("F1") + "%";
             _hoursText.Text = (r.PaidElapsed / 3600).ToString("F2") + " / " + (r.PaidSeconds / 3600).ToString("F2") + " 小时";
             _barTrack.Visibility = r.State == WorkState.RestDay ? Visibility.Collapsed : Visibility.Visible;
@@ -497,8 +501,14 @@ namespace NiuMa
             _month.Text = _s.Masked ? c + "****" : c + month.ToString("N2");
             int pd = Engine.DaysToPayDay(_s, now);
             _monthSub.Text = "已过的工作日按满勤计，本月满勤约 " + (_s.Masked ? "****" : c + monthTotal.ToString("N0")) + "  ·  " + (pd == 0 ? "今天发工资！" : "距离发薪日还有 " + pd + " 天");
-            _hourly.Text = "时薪 " + c + r.HourlyPay.ToString("F2") + "   ·   分薪 " + c + (r.HourlyPay / 60).ToString("F3") +
-                "\n今日满勤可得 " + (_s.Masked ? "****" : c + r.DailyPay.ToString("F2")) + (_s.SalaryMode == 1 ? "（月薪 " + (_s.Masked ? "****" : c + _s.Amount.ToString("N0")) + " ÷ " + _s.MonthDays + " 天）" : "");
+            if (_s.SalaryMode == AppSettings.HuaweiSalaryMode && !ChinaWorkCalendar.HasYear(now.Year))
+                _monthSub.Text += "  ·  节假日暂按每周排班估算";
+            string payDetails = "";
+            if (_s.SalaryMode == 1)
+                payDetails = "（月薪 " + payText(_s.Amount, "N0") + " ÷ " + _s.MonthDays + " 天）";
+            if (r.IsHuaweiOvertime) payDetails = "（月末周六 · 基础日薪 × 2）";
+            _hourly.Text = "时薪 " + payText(r.HourlyPay, "F2") + "   ·   分薪 " + payText(r.HourlyPay / 60, "F3") +
+                "\n今日满勤可得 " + payText(r.DailyPay, "F2") + payDetails;
             UpdateQuote(false);
 
             if (_lastState.HasValue && _lastState != r.State && _s.OffWorkNotify)

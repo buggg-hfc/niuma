@@ -27,6 +27,7 @@ namespace NiuMa
             try
             {
                 CheckCore();
+                CheckHuawei();
 #if WINDOWS_UI_TESTS
                 CheckEditor();
 #endif
@@ -101,6 +102,81 @@ namespace NiuMa
                 Check(loaded.StatusPreferences.Label(WorkState.Working) == "新文案 Working", "deletion preserves other occupation overrides");
             }
             finally { Directory.Delete(directory, true); }
+        }
+
+        static void CheckHuawei()
+        {
+            var settings = new AppSettings
+            {
+                SalaryMode = AppSettings.HuaweiSalaryMode,
+                HuaweiBasePay = 12000,
+                HuaweiPerformancePay = 4000,
+                HuaweiAnnualBonus = 24000
+            };
+            var friday = new DateTime(2025, 6, 27, 19, 0, 0);
+            var saturday = new DateTime(2025, 6, 28, 14, 30, 0);
+            var normal = Engine.Compute(settings, friday);
+            var extra = Engine.Compute(settings, saturday);
+            Check(normal.DailyPay == 900 && !normal.IsHuaweiOvertime,
+                "ordinary wages and one twelfth of the bonus use the 20 scheduled workdays in June");
+            Check(extra.IsHuaweiOvertime && extra.DailyPay == 1200 && Math.Abs(extra.Earned - 600) < 1e-8,
+                "the added Saturday earns double the base daily rate across the regular work hours");
+            settings.Overtime = true;
+            var afterSaturday = Engine.Compute(settings, saturday.Date.AddHours(20));
+            Check(afterSaturday.State == WorkState.AfterWork && Math.Abs(afterSaturday.Earned - 1200) < 1e-8,
+                "the added Saturday ends at the daily double-pay amount even when ordinary overtime is enabled");
+            settings.Overtime = false;
+            Check(Math.Abs(Engine.MonthEarned(settings, saturday, extra.Earned) - 17700) < 1e-8 &&
+                Math.Abs(Engine.MonthTotal(settings, saturday) - 19200) < 1e-8,
+                "month-to-date and projected income count the double-paid day once");
+
+            var holiday = Engine.Compute(settings, new DateTime(2025, 5, 31, 12, 0, 0));
+            Check(holiday.State == WorkState.RestDay && holiday.DailyPay == 0 && !holiday.IsHuaweiOvertime,
+                "a public holiday on the last Saturday remains a day off");
+            var makeup = Engine.Compute(settings, new DateTime(2026, 2, 28, 12, 0, 0));
+            Check(makeup.State == WorkState.Working && !makeup.IsHuaweiOvertime && makeup.DailyPay > 0 &&
+                makeup.DailyPay == Engine.Compute(settings, new DateTime(2026, 2, 27)).DailyPay,
+                "a scheduled makeup shift replaces the double-paid Saturday with ordinary wages");
+            Check(!Engine.IsWorkDay(settings, new DateTime(2025, 9, 27)) &&
+                Engine.IsWorkDay(settings, new DateTime(2025, 9, 28)),
+                "a makeup Sunday can cancel the added Saturday and remains a working day");
+
+            var monthEnd = new DateTime(2026, 1, 31);
+            Check(Engine.Compute(settings, monthEnd).IsHuaweiOvertime,
+                "a last Saturday producing six consecutive workdays remains eligible");
+            settings.OverrideDate = Engine.DateKey(monthEnd.AddDays(1));
+            settings.OverrideMode = 2;
+            Check(!Engine.IsWorkDay(settings, monthEnd) && Engine.IsWorkDay(settings, monthEnd.AddDays(1)),
+                "a personal shift in the next month can make the streak exactly seven and cancel the Saturday");
+
+            settings.OverrideMode = 1;
+            settings.OverrideDate = Engine.DateKey(friday);
+            Check(Engine.Compute(settings, friday).DailyPay == 0 && Engine.Compute(settings, saturday).DailyPay == 1200,
+                "personal leave overrides attendance without changing the scheduled-day divisor");
+            var movedPayday = new DateTime(2026, 2, 14);
+            settings.OverrideDate = Engine.DateKey(movedPayday);
+            Check(!Engine.IsWorkDay(settings, movedPayday) &&
+                Engine.DaysToPayDay(settings, movedPayday.AddDays(-1)) == 1 && Engine.DaysToPayDay(settings, movedPayday) == 0,
+                "payday moves back from the public holiday to an official makeup workday regardless of personal leave");
+            Check(Engine.DaysToPayDay(settings, movedPayday.AddDays(1)) == 26,
+                "the countdown advances to the next adjusted payday after an early payday");
+
+            settings.HuaweiMonthDays = 24;
+            Check(Engine.Compute(settings, friday).DailyPay == 750 &&
+                Engine.Compute(settings, saturday).DailyPay == 1000,
+                "a manual divisor changes both wage rates while preserving the calendar");
+
+            var directory = Path.Combine(Path.GetTempPath(), "niuma-windows-huawei-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var file = Path.Combine(directory, "settings.ini");
+                settings.SaveTo(file);
+                var loaded = AppSettings.LoadFrom(file);
+                Check(loaded.SalaryMode == AppSettings.HuaweiSalaryMode && loaded.HuaweiBasePay == 12000 &&
+                    loaded.HuaweiPerformancePay == 4000 && loaded.HuaweiAnnualBonus == 24000 && loaded.HuaweiMonthDays == 24,
+                    "Huawei salary settings survive reopening the configuration");
+            }
+            finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
         }
 
 #if WINDOWS_UI_TESTS

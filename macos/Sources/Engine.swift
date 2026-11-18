@@ -26,6 +26,7 @@ struct Snapshot {
     var progress = 0.0
     var secondsToNext = 0.0
     var overtimeSeconds = 0.0
+    var huaweiDoublePay = false
 }
 
 struct Engine {
@@ -34,6 +35,9 @@ struct Engine {
         calendar.timeZone = .current
         return calendar
     }()
+    var holidays = ChinaWorkCalendar.bundled
+
+    var huaweiPayroll: HuaweiPayroll { HuaweiPayroll(calendar: calendar, holidays: holidays) }
 
     func dateKey(_ date: Date) -> String {
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
@@ -41,6 +45,7 @@ struct Engine {
     }
 
     func isWorkDay(_ settings: AppSettings, _ date: Date) -> Bool {
+        if settings.usesHuaweiPayroll { return huaweiPayroll.workDay(settings, on: date) != .rest }
         if settings.overrideMode != 0 && settings.overrideDate == dateKey(date) { return settings.overrideMode == 2 }
         return settings.workDays.contains(calendar.component(.weekday, from: date) - 1)
     }
@@ -58,11 +63,24 @@ struct Engine {
         let clock = calendar.dateComponents([.hour, .minute, .second, .nanosecond], from: date)
         let time = Double(clock.hour! * 3600 + clock.minute! * 60 + clock.second!) + Double(clock.nanosecond ?? 0) / 1e9
         var result = Snapshot()
-        result.dailyPay = settings.dailyPay
+        let works: Bool
+        if settings.usesHuaweiPayroll {
+            let payroll = huaweiPayroll
+            let workDay = payroll.workDay(settings, on: date)
+            works = workDay != .rest
+            result.huaweiDoublePay = workDay == .doubleBase
+            if works {
+                let rates = payroll.rates(settings, in: date)
+                result.dailyPay = result.huaweiDoublePay ? rates.doubleBase : rates.regular
+            }
+        } else {
+            works = isWorkDay(settings, date)
+            result.dailyPay = settings.dailyPay
+        }
         result.paidSeconds = paid(86_400)
         let rate = result.paidSeconds > 0 ? result.dailyPay / result.paidSeconds : 0
         result.hourlyPay = rate * 3600
-        guard isWorkDay(settings, date) else { result.state = .restDay; return result }
+        guard works else { result.state = .restDay; return result }
         result.paidElapsed = paid(time)
         result.earned = rate * result.paidElapsed
         result.progress = result.paidSeconds > 0 ? result.paidElapsed / result.paidSeconds : 0
@@ -72,7 +90,7 @@ struct Engine {
             result.state = .lunch; result.secondsToNext = lunchEnd - time
         } else if time < end {
             result.state = .working; result.speed = rate; result.secondsToNext = end - time
-        } else if settings.overtime {
+        } else if settings.overtime && !result.huaweiDoublePay {
             result.state = .overtime; result.overtimeSeconds = time - end
             result.speed = rate * settings.overtimeRate
             result.earned += result.overtimeSeconds * result.speed
@@ -83,21 +101,28 @@ struct Engine {
     }
 
     func monthEarned(_ settings: AppSettings, at date: Date, todayEarned: Double) -> Double {
-        guard let first = calendar.dateInterval(of: .month, for: date)?.start else { return todayEarned }
-        var day = first, total = todayEarned
-        while day < calendar.startOfDay(for: date) {
-            if isWorkDay(settings, day) { total += settings.dailyPay }
-            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
-            day = next
-        }
-        return total
+        monthEarnings(settings, in: date, before: calendar.startOfDay(for: date)) + todayEarned
     }
 
     func monthTotal(_ settings: AppSettings, at date: Date) -> Double {
+        monthEarnings(settings, in: date, before: nil)
+    }
+
+    private func monthEarnings(_ settings: AppSettings, in date: Date, before end: Date?) -> Double {
         guard let interval = calendar.dateInterval(of: .month, for: date) else { return 0 }
+        let payroll = huaweiPayroll
+        let rates = settings.usesHuaweiPayroll ? payroll.rates(settings, in: date) : nil
         var day = interval.start, total = 0.0
-        while day < interval.end {
-            if isWorkDay(settings, day) { total += settings.dailyPay }
+        while day < (end ?? interval.end) {
+            if let rates = rates {
+                switch payroll.workDay(settings, on: day) {
+                case .regular: total += rates.regular
+                case .doubleBase: total += rates.doubleBase
+                case .rest: break
+                }
+            } else if isWorkDay(settings, day) {
+                total += settings.dailyPay
+            }
             guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
             day = next
         }
@@ -107,6 +132,7 @@ struct Engine {
     func daysToPayDay(_ settings: AppSettings, at date: Date) -> Int {
         let today = calendar.startOfDay(for: date)
         func payday(in month: Date) -> Date {
+            if settings.usesHuaweiPayroll { return huaweiPayroll.payday(in: month) }
             var parts = calendar.dateComponents([.year, .month], from: month)
             parts.day = min(max(1, settings.payDay), calendar.range(of: .day, in: .month, for: month)!.count)
             return calendar.date(from: parts)!
