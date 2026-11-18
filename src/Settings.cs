@@ -39,6 +39,7 @@ namespace NiuMa
         public double Top = double.NaN;
         public string OverrideDate = "";
         public int OverrideMode = 0;        // 0 正常, 1 今天休息, 2 今天上班
+        internal StatusPreferences StatusPreferences = new StatusPreferences();
         public string Wishlist = "一瓶可乐=3\n一个煎饼果子=8\n一杯奶茶=15\n一份猪脚饭=22\n一杯咖啡=30\n一张电影票=45\n一件T恤=79\n一顿火锅=120\n一双球鞋=399";
         public string Quotes = "摸鱼不是偷懒，是在给老板省电。\n工资不多，但每一秒都在到账。\n上班是为了下班，下班是为了明天还能上班。\n今天的你，又为老板的新车贡献了一个轮毂。\n别慌，钱在路上，人在工位。\n带薪如厕，是打工人最后的倔强。\n只要我不努力，老板就过不上他想要的生活。\n工作是老板的，命是自己的。\n再坚持一下，离下班又近了一秒。\n今日份的牛马已上线，正在稳定产出。";
 
@@ -48,7 +49,12 @@ namespace NiuMa
         }
         public static string FilePath { get { return Path.Combine(Dir, "settings.ini"); } }
 
-        public AppSettings Clone() { return (AppSettings)MemberwiseClone(); }
+        public AppSettings Clone()
+        {
+            var copy = (AppSettings)MemberwiseClone();
+            copy.StatusPreferences = StatusPreferences.Clone();
+            return copy;
+        }
 
         public double DailyPay()
         {
@@ -122,32 +128,57 @@ namespace NiuMa
 
         public void Save()
         {
-            try
-            {
-                Directory.CreateDirectory(Dir);
-                var sb = new StringBuilder();
-                foreach (var f in typeof(AppSettings).GetFields(BindingFlags.Public | BindingFlags.Instance))
-                {
-                    object v = f.GetValue(this);
-                    string s = v is double ? ((double)v).ToString("R", CultureInfo.InvariantCulture) : Convert.ToString(v, CultureInfo.InvariantCulture);
-                    sb.Append(f.Name).Append('=').Append(Esc(s ?? "")).Append("\r\n");
-                }
-                File.WriteAllText(FilePath, sb.ToString(), Encoding.UTF8);
-            }
+            try { SaveTo(FilePath); }
             catch { }
         }
 
-        public static AppSettings Load()
+        internal void SaveTo(string path)
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            Directory.CreateDirectory(dir);
+            var sb = new StringBuilder();
+            foreach (var f in typeof(AppSettings).GetFields(BindingFlags.Public | BindingFlags.Instance))
+            {
+                object v = f.GetValue(this);
+                string s = v is double ? ((double)v).ToString("R", CultureInfo.InvariantCulture) : Convert.ToString(v, CultureInfo.InvariantCulture);
+                sb.Append(f.Name).Append('=').Append(Esc(s ?? "")).Append("\r\n");
+            }
+            foreach (var entry in StatusPreferences.WriteEntries())
+                sb.Append(entry.Key).Append('=').Append(Esc(entry.Value)).Append("\r\n");
+
+            var temporary = Path.Combine(dir, Path.GetRandomFileName());
+            try
+            {
+                File.WriteAllText(temporary, sb.ToString(), Encoding.UTF8);
+                if (File.Exists(path)) File.Replace(temporary, path, null);
+                else File.Move(temporary, path);
+            }
+            finally
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
+            }
+        }
+
+        public static AppSettings Load() { return LoadFrom(FilePath); }
+
+        internal static AppSettings LoadFrom(string path)
         {
             var s = new AppSettings();
             try
             {
-                if (!File.Exists(FilePath)) return s;
-                foreach (var line in File.ReadAllLines(FilePath, Encoding.UTF8))
+                if (!File.Exists(path)) return s;
+                var statusEntries = new Dictionary<string, string>();
+                foreach (var line in File.ReadAllLines(path, Encoding.UTF8))
                 {
                     int i = line.IndexOf('=');
                     if (i <= 0) continue;
-                    var f = typeof(AppSettings).GetField(line.Substring(0, i), BindingFlags.Public | BindingFlags.Instance);
+                    var key = line.Substring(0, i);
+                    if (key.StartsWith("Status.", StringComparison.Ordinal))
+                    {
+                        statusEntries[key] = Unesc(line.Substring(i + 1));
+                        continue;
+                    }
+                    var f = typeof(AppSettings).GetField(key, BindingFlags.Public | BindingFlags.Instance);
                     if (f == null) continue;
                     string v = Unesc(line.Substring(i + 1));
                     try
@@ -159,6 +190,7 @@ namespace NiuMa
                     }
                     catch { }
                 }
+                s.StatusPreferences = StatusPreferences.ReadEntries(statusEntries);
             }
             catch { }
             return s;

@@ -20,6 +20,7 @@ namespace NiuMa
         CheckBox[] _days = new CheckBox[7];
         Slider _bgOp, _panelOp, _winOp, _scale;
         TextBlock _error, _preview;
+        StatusEditor _statusEditor;
         bool _saved, _ready;
 
         const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -41,7 +42,7 @@ namespace NiuMa
             UseLayoutRounding = true;
             Build();
             _ready = true;
-            Closed += (o, e) => { if (!_saved) _main.ApplySettings(_orig, false); };
+            Closed += (o, e) => { if (!_saved) _main.ApplySettings(_orig); };
         }
 
         TextBox Box(string text, double width = double.NaN)
@@ -133,6 +134,13 @@ namespace NiuMa
             Section("基本");
             _name = Box(_s.AppName);
             Row("软件名称", _name, "显示在窗口标题、托盘和战报里");
+
+            Section("显示 · 状态文案");
+            _statusEditor = new StatusEditor(_s.StatusPreferences);
+            _grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(_statusEditor, _row++);
+            Grid.SetColumnSpan(_statusEditor, 2);
+            _grid.Children.Add(_statusEditor);
 
             Section("薪资");
             _mode = new ComboBox { Width = 90, SelectedIndex = _s.SalaryMode };
@@ -321,7 +329,7 @@ namespace NiuMa
                 var keep = _main.Current;
                 _s.Left = keep.Left; _s.Top = keep.Top; _s.Mini = keep.Mini; _s.Masked = keep.Masked;
                 _s.ClickThrough = keep.ClickThrough; _s.OverrideDate = keep.OverrideDate; _s.OverrideMode = keep.OverrideMode;
-                _main.ApplySettings(_s.Clone(), false);
+                _main.ApplySettings(_s.Clone());
                 Title = "设置 - " + _s.AppName;
             }
         }
@@ -342,12 +350,18 @@ namespace NiuMa
         {
             var err = Collect(_s);
             if (err != null) { _error.Text = err; return; }
+            var draft = _s.Clone();
+            try { draft.StatusPreferences = _statusEditor.Collect(); }
+            catch (ArgumentException invalid) { _error.Text = invalid.Message; return; }
             var keep = _main.Current;
-            _s.Left = keep.Left; _s.Top = keep.Top; _s.Mini = keep.Mini; _s.Masked = keep.Masked;
-            _s.ClickThrough = keep.ClickThrough; _s.OverrideDate = keep.OverrideDate; _s.OverrideMode = keep.OverrideMode;
+            draft.Left = keep.Left; draft.Top = keep.Top; draft.Mini = keep.Mini; draft.Masked = keep.Masked;
+            draft.ClickThrough = keep.ClickThrough; draft.OverrideDate = keep.OverrideDate; draft.OverrideMode = keep.OverrideMode;
+            try { draft.SaveTo(AppSettings.FilePath); }
+            catch (IOException) { _error.Text = "设置保存失败，请检查配置文件"; return; }
+            catch (UnauthorizedAccessException) { _error.Text = "设置保存失败，请检查文件权限"; return; }
             SetAutoStart(_autostart.IsChecked == true);
             _saved = true;
-            _main.ApplySettings(_s.Clone(), true);
+            _main.ApplySettings(draft);
             Close();
         }
 
@@ -366,6 +380,7 @@ namespace NiuMa
             _bgOp.Value = d.BgOpacity; _panelOp.Value = d.PanelOpacity; _winOp.Value = d.WindowOpacity; _scale.Value = d.UiZoom;
             _bgPath.Text = d.BgPath; _topmost.IsChecked = d.Topmost; _notify.IsChecked = d.OffWorkNotify;
             _wish.Text = d.Wishlist; _quotes.Text = d.Quotes;
+            _statusEditor.Reset(d.StatusPreferences);
             _ready = true;
             Changed();
         }

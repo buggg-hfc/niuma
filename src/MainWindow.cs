@@ -51,7 +51,7 @@ namespace NiuMa
 
             BuildUi();
             BuildTray();
-            ApplySettings(_s, false);
+            ApplySettings(_s);
 
             SourceInitialized += OnSourceInitialized;
             Loaded += (o, e) => PlaceWindow();
@@ -249,6 +249,8 @@ namespace NiuMa
             _clock.Margin = new Thickness(0, 0, 0, 8);
             card.Children.Add(_clock);
             _status = Ui.T("", 24, Ui.Blue, FontWeights.Bold);
+            _status.TextWrapping = TextWrapping.NoWrap;
+            _status.TextTrimming = TextTrimming.CharacterEllipsis;
             card.Children.Add(_status);
             _countdown = Ui.T("", 14, Ui.Ink);
             _countdown.Margin = new Thickness(0, 2, 0, 12);
@@ -324,6 +326,9 @@ namespace NiuMa
             host.Children.Add(_miniMask);
             row.Children.Add(host);
             _miniStatus = Ui.T("", 12, Ui.Sub);
+            _miniStatus.MaxWidth = 160;
+            _miniStatus.TextWrapping = TextWrapping.NoWrap;
+            _miniStatus.TextTrimming = TextTrimming.CharacterEllipsis;
             _miniStatus.VerticalAlignment = VerticalAlignment.Center;
             _miniStatus.Margin = new Thickness(10, 0, 0, 0);
             row.Children.Add(_miniStatus);
@@ -388,7 +393,7 @@ namespace NiuMa
             _tray.MouseClick += (o, e) => { if (e.Button == Forms.MouseButtons.Left) ToggleVisible(); };
         }
 
-        public void ApplySettings(AppSettings s, bool save)
+        public void ApplySettings(AppSettings s)
         {
             _s = s;
             var img = Ui.LoadBackground(_s.BgPath);
@@ -401,7 +406,6 @@ namespace NiuMa
             _lastState = null;
             _lastSecond = -1;
             Tick(true);
-            if (save) _s.Save();
         }
 
         public void ApplyVisual(AppSettings s)
@@ -462,19 +466,24 @@ namespace NiuMa
             string c = _s.Currency;
 
             _clock.Text = now.ToString("yyyy-MM-dd") + "  " + Week[(int)now.DayOfWeek] + "  " + now.ToString("HH:mm:ss");
-            string st, cd, mini;
+            string countdown;
             Brush color;
             switch (r.State)
             {
-                case WorkState.RestDay: st = "休息日"; color = Ui.Leaf; cd = "今天不用当牛马，好好休息。"; mini = "休息"; break;
-                case WorkState.BeforeWork: st = "还没上班"; color = Ui.Gray; cd = "距离上班还有 " + Engine.Duration(r.SecondsToNext, true); mini = "未上班"; break;
-                case WorkState.Lunch: st = "午休中"; color = Ui.Leaf; cd = "午休还剩 " + Engine.Duration(r.SecondsToNext, true) + "，暂停计薪"; mini = "午休"; break;
-                case WorkState.Working: st = "上班中"; color = Ui.Blue; cd = "距离下班还有 " + Engine.Duration(r.SecondsToNext, true); mini = Engine.Duration(r.SecondsToNext, false) + "后下班"; break;
-                case WorkState.Overtime: st = "加班中"; color = Ui.Carrot; cd = "已加班 " + Engine.Duration(r.OvertimeSeconds, true) + "，按 " + _s.OvertimeRate + " 倍计"; mini = "加班中"; break;
-                default: st = "已下班"; color = Ui.Leaf; cd = "今天的牛马已下线，快跑！"; mini = "已下班"; break;
+                case WorkState.RestDay: color = Ui.Leaf; countdown = "今天不用当牛马，好好休息。"; break;
+                case WorkState.BeforeWork: color = Ui.Gray; countdown = "距离上班还有 " + Engine.Duration(r.SecondsToNext, true); break;
+                case WorkState.Lunch: color = Ui.Leaf; countdown = "午休还剩 " + Engine.Duration(r.SecondsToNext, true) + "，暂停计薪"; break;
+                case WorkState.Working: color = Ui.Blue; countdown = "距离下班还有 " + Engine.Duration(r.SecondsToNext, true); break;
+                case WorkState.Overtime: color = Ui.Carrot; countdown = "已加班 " + Engine.Duration(r.OvertimeSeconds, true) + "，按 " + _s.OvertimeRate + " 倍计"; break;
+                default: color = Ui.Leaf; countdown = "今天的牛马已下线，快跑！"; break;
             }
-            _status.Text = st; _status.Foreground = color; _countdown.Text = cd;
-            _miniStatus.Text = mini; _miniDot.Background = color;
+            _status.Text = _s.StatusPreferences.Label(r.State);
+            _status.ToolTip = _status.Text;
+            _status.Foreground = color;
+            _countdown.Text = countdown;
+            _miniStatus.Text = _s.StatusPreferences.MiniLabel(r);
+            _miniStatus.ToolTip = _miniStatus.Text;
+            _miniDot.Background = color;
 
             int dec = Math.Max(2, Math.Min(6, _s.Decimals));
             _speed.Text = r.Speed > 0 ? "当前赚钱速度  " + c + r.Speed.ToString("F" + dec) + " / 秒  ·  " + c + (r.Speed * 60).ToString("F2") + " / 分钟" : "当前赚钱速度  " + c + "0 / 秒（暂停计薪）";
@@ -582,12 +591,7 @@ namespace NiuMa
 
         void CopyReport()
         {
-            var now = Now();
-            var r = Engine.Compute(_s, now);
-            string c = _s.Currency;
-            string txt = "【" + _title.Text + " · 今日战报】" + now.ToString("yyyy-MM-dd") + "\n" +
-                "状态：" + _status.Text + "\n今日已赚：" + c + r.Earned.ToString("F2") + " / " + c + r.DailyPay.ToString("F2") +
-                "（进度 " + (r.Progress * 100).ToString("F1") + "%）\n" + "时薪：" + c + r.HourlyPay.ToString("F2") + "\n" + _wish.Text;
+            var txt = Engine.Report(_s, Now());
             try { Clipboard.SetText(txt); Notify("战报已复制", "可以直接粘贴给同事了。"); } catch { }
         }
 

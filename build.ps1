@@ -1,4 +1,6 @@
 ﻿# 编译 牛马脱敏器.exe（只需要 Windows 自带的 .NET Framework 4.x，无需安装任何东西）
+param([switch]$Test)
+
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $fw = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319"
@@ -20,3 +22,14 @@ $srcs = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_
   @refs @srcs
 if ($LASTEXITCODE -ne 0) { throw "编译失败" }
 Write-Host "已生成 $out"
+
+if ($Test) {
+  $testDir = Join-Path $root '.build'
+  New-Item -ItemType Directory -Force $testDir | Out-Null
+  $testExe = Join-Path $testDir 'NiuMa.Windows.Tests.exe'
+  & "$fw\csc.exe" /nologo /target:exe /platform:anycpu /codepage:65001 /define:WINDOWS_UI_TESTS /main:NiuMa.StatusTests `
+    "/out:$testExe" @refs @srcs (Join-Path $root 'tests\windows\StatusTests.cs')
+  if ($LASTEXITCODE -ne 0) { throw "测试编译失败" }
+  & $testExe
+  if ($LASTEXITCODE -ne 0) { throw "测试失败" }
+}

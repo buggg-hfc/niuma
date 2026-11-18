@@ -59,7 +59,9 @@ Mac 版保留薪资计算、工作状态、进度、月累计、心愿单、语�
 
 ### Windows 版本
 
-到 [Releases](../../releases) 页面下载 `牛马脱敏器.exe`，双击运行即可，无需安装。
+到 [Windows v1.1.0 发布页](../../releases/tag/windows-v1.1.0) 下载 `NiuMa-Windows.exe`，双击运行即可。
+
+在「设置 → 显示 · 状态文案」可以编辑和预览六种状态，套用内置职业，或将当前文案存为自定义职业。
 
 系统要求：Windows 10 / 11（自带 .NET Framework 4.8）。
 
@@ -71,7 +73,7 @@ Mac 版保留薪资计算、工作状态、进度、月累计、心愿单、语�
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-编译完成后，项目目录下会生成 `牛马脱敏器.exe`。`beij.png` 和 `src\app.ico` 会被打包进 exe。
+编译完成后，项目目录下会生成 `牛马脱敏器.exe`。`beij.png` 和 `src\app.ico` 会被打包进 exe。构建时加上 `-Test` 可运行配置、计薪和原生 WPF 设置回归。
 
 ## 项目结构
 

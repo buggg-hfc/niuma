@@ -117,6 +117,17 @@ namespace NiuMa
         // 剩余计薪秒数（用于心愿单预估）
         public static double PaidRemaining(Snapshot r) { return Math.Max(0, r.PaidSeconds - r.PaidElapsed); }
 
+        internal static string Report(AppSettings settings, DateTime now)
+        {
+            var r = Compute(settings, now);
+            var title = string.IsNullOrWhiteSpace(settings.AppName) ? "牛马脱敏器" : settings.AppName.Trim();
+            Func<double, string> money = value => settings.Masked ? "****" : settings.Currency + value.ToString("F2");
+            return "【" + title + " · 今日战报】" + DateKey(now) + "\n" +
+                "状态：" + settings.StatusPreferences.Label(r.State) + "\n今日已赚：" + money(r.Earned) + " / " + money(r.DailyPay) +
+                "（进度 " + (r.Progress * 100).ToString("F1") + "%）\n时薪：" + money(r.HourlyPay) +
+                (settings.Masked ? "" : "\n" + WishText(settings, r));
+        }
+
         public static double MonthEarned(AppSettings s, DateTime now, double todayEarned)
         {
             double sum = 0, daily = s.DailyPay();
