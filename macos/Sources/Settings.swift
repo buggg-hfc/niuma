@@ -37,6 +37,7 @@ struct AppSettings: Codable, Equatable {
     var windowY: Double?
     var overrideDate = ""
     var overrideMode = 0
+    var statusPreferences = StatusPreferences()
     var wishlist = "一瓶可乐=3\n一个煎饼果子=8\n一杯奶茶=15\n一份猪脚饭=22\n一杯咖啡=30\n一张电影票=45\n一件T恤=79\n一顿火锅=120\n一双球鞋=399"
     var quotes = "摸鱼不是偷懒，是在给老板省电。\n工资不多，但每一秒都在到账。\n上班是为了下班，下班是为了明天还能上班。\n今天的你，又为老板的新车贡献了一个轮毂。\n别慌，钱在路上，人在工位。\n带薪如厕，是打工人最后的倔强。\n只要我不努力，老板就过不上他想要的生活。\n工作是老板的，命是自己的。\n再坚持一下，离下班又近了一秒。\n今日份的牛马已上线，正在稳定产出。"
 
@@ -121,6 +122,7 @@ struct SettingsStore {
             throw SettingsError(message: "设置文件格式不正确：\(fileURL.path)")
         }
         var merged = defaults.merging(saved) { _, new in new }
+        if !(saved["statusPreferences"] is [String: Any]) { merged["statusPreferences"] = defaults["statusPreferences"] }
         if saved["salaryConfigured"] == nil { merged["salaryConfigured"] = true }
         return try JSONDecoder().decode(AppSettings.self, from: JSONSerialization.data(withJSONObject: merged)).validated()
     }

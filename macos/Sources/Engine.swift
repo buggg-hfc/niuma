@@ -1,8 +1,18 @@
 import Foundation
 
-enum WorkState: String {
-    case beforeWork = "还没上班", working = "上班中", lunch = "午休中"
-    case overtime = "加班中", afterWork = "已下班", restDay = "休息日"
+enum WorkState: String, CaseIterable, CodingKey {
+    case beforeWork, working, lunch, overtime, afterWork, restDay
+
+    var defaultLabel: String {
+        switch self {
+        case .beforeWork: return "还没上班"
+        case .working: return "上班中"
+        case .lunch: return "午休中"
+        case .overtime: return "加班中"
+        case .afterWork: return "已下班"
+        case .restDay: return "休息日"
+        }
+    }
 }
 
 struct Snapshot {
@@ -144,6 +154,6 @@ struct Engine {
         let snapshot = compute(settings, at: date)
         func money(_ value: Double) -> String { settings.masked ? "****" : settings.currency + String(format: "%.2f", value) }
         let title = settings.salaryConfigured ? "今日战报" : "示例战报 · 尚未设置薪资"
-        return "【\(settings.appName) · \(title)】\(dateKey(date))\n状态：\(snapshot.state.rawValue)\n今日已赚：\(money(snapshot.earned)) / \(money(snapshot.dailyPay))（进度 \(String(format: "%.1f", snapshot.progress * 100))%）\n时薪：\(money(snapshot.hourlyPay))" + (settings.masked ? "" : "\n" + wishText(settings, snapshot: snapshot))
+        return "【\(settings.appName) · \(title)】\(dateKey(date))\n状态：\(settings.statusPreferences.label(for: snapshot.state))\n今日已赚：\(money(snapshot.earned)) / \(money(snapshot.dailyPay))（进度 \(String(format: "%.1f", snapshot.progress * 100))%）\n时薪：\(money(snapshot.hourlyPay))" + (settings.masked ? "" : "\n" + wishText(settings, snapshot: snapshot))
     }
 }

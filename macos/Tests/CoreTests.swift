@@ -137,6 +137,27 @@ struct CoreTests {
         check(try store.load().amount == 200 && store.load().decimals == 5, "missing fields get defaults")
         let legacyJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(store.load())) as! [String: Any]
         check(legacyJSON["salaryConfigured"] as? Bool == true, "legacy settings count as configured salary")
+        let workingTime = date("2026-11-10T14:00:00")
+        check(engine.report(try store.load(), at: workingTime).contains("状态：上班中"), "legacy settings use the original status wording")
+        let occupationJSON = #"""
+        {"amount":234,"lunchEnabled":true,"overtime":true,"statusPreferences":{
+          "selectedOccupationID":"cook",
+          "overrides":{"general":null,"cook":{"working":"  🍳 掌勺中  ","lunch":42,"overtime":"坏\n文案"}},
+          "customOccupations":[null,{"id":"test-profile","name":"面包师","labels":{"working":"烤面包"}}]
+        }}
+        """#
+        try Data(occupationJSON.utf8).write(to: store.fileURL)
+        let occupationSettings = try store.load()
+        check(engine.report(occupationSettings, at: workingTime).contains("状态：🍳 掌勺中\n"), "report shows the selected occupation's custom status")
+        check(engine.report(occupationSettings, at: date("2026-11-10T12:30:00")).contains("状态：歇一会儿\n"), "mistyped status falls back to the selected occupation")
+        check(engine.report(occupationSettings, at: date("2026-11-10T21:00:00")).contains("状态：加班中\n"), "multiline status falls back independently")
+        near(engine.compute(occupationSettings, at: workingTime).earned, 87.75, "custom wording preserves paid time and earned amount")
+        check(occupationSettings.statusPreferences.customOccupations.map(\.name) == ["面包师"], "a malformed custom occupation does not discard the others")
+        try store.save(occupationSettings)
+        check(try store.load() == occupationSettings, "occupation settings round-trip after repairing individual invalid fields")
+        try Data(#"{"amount":321,"statusPreferences":null}"#.utf8).write(to: store.fileURL)
+        let fallback = try store.load()
+        check(fallback.amount == 321 && fallback.statusPreferences.label(for: .working) == "上班中", "invalid status settings preserve unrelated pay settings")
         let corrupt = Data("not JSON".utf8)
         try corrupt.write(to: store.fileURL)
         do { _ = try store.load(); fatalError("corrupt file accepted") } catch {}

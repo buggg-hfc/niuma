@@ -119,6 +119,96 @@ struct AppTests {
         check(saved.salaryConfigured && saved.appName == "我的牛马" && saved.wishlist == "一份快乐=25", "one save commits setup and edits across all groups")
         check(saved.monthDays == 21.75 && saved.lunchStart == "12:00" && saved.overtimeRate == 1.5, "disabled invalid fields preserve stored values")
         check(controller.settings.masked && controller.settings.clickThrough, "saving retains runtime toggles")
+
+        controller.openSettings(nil)
+        let statusEditor = controller.settingsWindow!
+        let statusControls = descendants(statusEditor.window!.contentView!)
+        func control<T: NSControl>(_ id: String, as type: T.Type) -> T {
+            let match = statusControls.compactMap { $0 as? T }.first { $0.identifier?.rawValue == id }
+            check(match != nil, "settings exposes \(id)")
+            return match!
+        }
+        let statusNavigation = statusControls.compactMap { $0 as? NSSegmentedControl }.first!
+        statusNavigation.selectedSegment = 1
+        statusNavigation.sendAction(statusNavigation.action, to: statusNavigation.target)
+        let occupations = control("statusOccupation", as: NSPopUpButton.self)
+        let workText = control("statusField.working", as: NSTextField.self)
+        let workPreview = control("statusPreview.working", as: NSTextField.self)
+        let resetWork = control("statusReset.working", as: NSButton.self)
+        func selectOccupation(_ name: String) {
+            occupations.selectItem(withTitle: name)
+            occupations.sendAction(occupations.action, to: occupations.target)
+        }
+        check(!workText.isHiddenOrHasHiddenAncestor, "status editor is visible in Desktop Appearance")
+        check(statusControls.filter { $0.identifier?.rawValue.hasPrefix("statusPreview.") == true }.count == 6, "all six states have a preview")
+        check(workPreview.stringValue == "上班中", "regular occupation previews legacy wording")
+        for state in WorkState.allCases {
+            let input = control("statusField.\(state.rawValue)", as: NSTextField.self)
+            let preview = control("statusPreview.\(state.rawValue)", as: NSTextField.self)
+            check(statusEditor.window!.makeFirstResponder(input), "\(state.rawValue) accepts individual edits")
+            input.currentEditor()!.insertText("自定义\(state.defaultLabel)")
+            check(preview.stringValue == "自定义\(state.defaultLabel)", "\(state.rawValue) previews its own edits")
+            control("statusReset.\(state.rawValue)", as: NSButton.self).performClick(nil)
+            check(preview.stringValue == state.defaultLabel, "\(state.rawValue) restores its default individually")
+        }
+        selectOccupation("上钟 / 下钟")
+        check(workPreview.stringValue == "上钟中", "selecting an occupation previews its defaults immediately")
+        check(statusEditor.window!.makeFirstResponder(workText), "status input accepts keyboard focus")
+        let fieldEditor = workText.currentEditor()!
+        fieldEditor.insertText("驻场中")
+        check(workPreview.stringValue == "驻场中", "typing previews the active field before commit")
+        selectOccupation("厨师")
+        check(workPreview.stringValue == "掌勺中", "another occupation starts with its own defaults")
+        selectOccupation("上钟 / 下钟")
+        check(workPreview.stringValue == "驻场中", "switching back restores the occupation's override")
+        resetWork.performClick(nil)
+        check(workPreview.stringValue == "上钟中", "one-state restore uses the current occupation's default")
+        check(statusEditor.window!.makeFirstResponder(workText), "can edit restored status")
+        workText.currentEditor()!.insertText("驻场中")
+        control("statusOccupationName", as: NSTextField.self).stringValue = "驻场演出"
+        control("statusSaveOccupation", as: NSButton.self).performClick(nil)
+        check(occupations.titleOfSelectedItem == "驻场演出" && workText.stringValue.isEmpty && workPreview.stringValue == "驻场中",
+              "saving a named occupation makes the previewed labels its defaults")
+        check(statusEditor.window!.makeFirstResponder(workText), "can override the new occupation's default")
+        workText.currentEditor()!.insertText("排练中")
+        control("statusRestoreDefaults", as: NSButton.self).performClick(nil)
+        check(workPreview.stringValue == "驻场中", "group restore returns to the custom occupation's defaults")
+        check(controller.settings == saved, "editing status settings affects only the draft")
+        check(statusEditor.saveDraft(), "status draft saves through the settings window")
+        let persistedStatus = try store.load().statusPreferences
+        check(persistedStatus.customOccupations.map(\.name) == ["驻场演出"] && persistedStatus.label(for: .working) == "驻场中", "selected custom occupation persists")
+        var workingSnapshot = Snapshot()
+        workingSnapshot.state = .working
+        workingSnapshot.secondsToNext = 3600
+        controller.panel.mainView.update(workingSnapshot, engine: Engine(), at: Date())
+        let badge = descendants(controller.panel.mainView).compactMap { $0 as? NSTextField }.first { $0.identifier?.rawValue == "workStatus" }!
+        check(badge.stringValue == "驻场中" && badge.toolTip == "驻场中", "full window applies the saved label and exposes its full text")
+        let longStatus = "现场排练中 · Rehearsing 🧑‍🎤 今天还有两场演出"
+        var smallPanel = controller.settings
+        smallPanel.uiZoom = 0.5
+        try smallPanel.statusPreferences.setOverrides([.working: longStatus])
+        controller.panel.apply(smallPanel)
+        controller.panel.mainView.update(workingSnapshot, engine: Engine(), at: Date())
+        check(badge.frame.width == workPreview.frame.width && badge.maximumNumberOfLines == 1 && badge.lineBreakMode == .byTruncatingTail,
+              "minimum zoom keeps a single-line status matching the preview's width")
+        check(badge.stringValue == longStatus && badge.toolTip == longStatus, "long mixed-script wording stays available in the tooltip")
+        controller.toggleMini(nil)
+        controller.panel.mainView.setReportCopied(false)
+        controller.panel.mainView.update(workingSnapshot, engine: Engine(), at: Date())
+        check(badge.stringValue.hasSuffix("后下班"), "mini mode keeps the working countdown")
+        workingSnapshot.state = .afterWork
+        controller.panel.mainView.update(workingSnapshot, engine: Engine(), at: Date())
+        check(badge.stringValue == "已下钟", "mini mode uses the occupation label outside active work")
+        controller.toggleMini(nil)
+        controller.openSettings(nil)
+        let discardStatus = controller.settingsWindow!
+        let discardControls = descendants(discardStatus.window!.contentView!)
+        let removeOccupation = discardControls.compactMap { $0 as? NSButton }.first { $0.identifier?.rawValue == "statusDeleteOccupation" }!
+        check(removeOccupation.isEnabled, "reopening restores the selected editable occupation")
+        removeOccupation.performClick(nil)
+        discardStatus.close()
+        check(try store.load().statusPreferences == persistedStatus, "cancelling after deletion preserves the saved occupation")
+
         controller.toggleClickThrough(nil)
         check(!controller.panel.ignoresMouseEvents, "menu can recover click-through")
         controller.toggleVisible(nil)

@@ -17,6 +17,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
     private let decimals = NSPopUpButton()
     private let errorLabel = Theme.label(12, color: .systemRed)
     private let preview = Theme.label(12, color: Theme.blue)
+    private var statusEditor: StatusEditor?
     private var form = FlippedForm()
     private let sections = NSSegmentedControl()
     private var pages: [NSScrollView] = []
@@ -171,6 +172,13 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
         finishPage(in: root)
 
         beginPage()
+        section("状态文案")
+        let statusEditor = StatusEditor(preferences: s.statusPreferences,
+                                        frame: NSRect(x: 24, y: cursor, width: formWidth - 48, height: StatusEditor.height))
+        statusEditor.showError = { [weak self] message in self?.errorLabel.stringValue = message }
+        form.addSubview(statusEditor)
+        cursor += StatusEditor.height
+        self.statusEditor = statusEditor
         section("数字与纸感")
         row("软件名称", field("appName", s.appName))
         decimals.removeAllItems()
@@ -309,6 +317,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
     @discardableResult func saveDraft() -> Bool {
         do {
             var settings = try collect()
+            if let statusEditor = statusEditor { settings.statusPreferences = try statusEditor.collect() }
             settings.salaryConfigured = true
             try onSave(settings, checks["autoStart"]!.state == .on)
             close(); return true

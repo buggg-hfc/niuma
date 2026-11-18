@@ -7,6 +7,7 @@ enum Theme {
     static let orange = NSColor(srgbRed: 0.80, green: 0.33, blue: 0.12, alpha: 1)
     static let green = NSColor(srgbRed: 0.19, green: 0.37, blue: 0.29, alpha: 1)
     static let blue = NSColor(srgbRed: 0.24, green: 0.39, blue: 0.44, alpha: 1)
+    static let statusLabelWidth = 84.0
 
     static func label(_ size: CGFloat, color: NSColor = ink, bold: Bool = false) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: "")
@@ -14,6 +15,22 @@ enum Theme {
         label.textColor = color
         label.maximumNumberOfLines = 3
         return label
+    }
+
+    static func statusLabel() -> NSTextField {
+        let field = NSTextField(labelWithString: "")
+        field.font = .systemFont(ofSize: 12, weight: .semibold)
+        field.alignment = .center
+        field.maximumNumberOfLines = 1
+        field.lineBreakMode = .byTruncatingTail
+        return field
+    }
+
+    static func showStatus(_ text: String, in field: NSTextField) {
+        guard field.stringValue != text || field.toolTip != text else { return }
+        field.stringValue = text
+        field.toolTip = text
+        field.setAccessibilityLabel(text)
     }
 }
 
@@ -131,13 +148,13 @@ final class MainView: NSView {
             ("hourly", 11, Theme.muted, false), ("footer", 10, Theme.muted, false),
             ("estimate", 10, Theme.muted, false), ("mask", 44, Theme.orange, true)
         ] {
-            let field = Theme.label(size, color: color, bold: bold)
+            let field = key == "status" ? Theme.statusLabel() : Theme.label(size, color: color, bold: bold)
             labels[key] = field
             addSubview(field)
         }
         labels["monthValue"]?.alignment = .right
         labels["hours"]?.alignment = .right
-        labels["status"]?.alignment = .center
+        labels["status"]?.identifier = NSUserInterfaceItemIdentifier("workStatus")
         labels["footer"]?.alignment = .right
         labels["title"]?.maximumNumberOfLines = 1
         labels["title"]?.lineBreakMode = .byTruncatingTail
@@ -232,7 +249,7 @@ final class MainView: NSView {
         }
         place("clock", 22, 46, 330, 18)
         place("today", 32, 92, 214, 18)
-        place("status", 260, 91, 84, 20)
+        place("status", 260, 91, Theme.statusLabelWidth, 20)
         amount.frame = NSRect(x: 30, y: 118, width: 320, height: 66)
         place("mask", 30, 118, 320, 66)
         place("speed", 32, 190, 316, 20)
@@ -255,7 +272,7 @@ final class MainView: NSView {
     func update(_ snapshot: Snapshot, engine: Engine, at now: Date) {
         let week = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][engine.calendar.component(.weekday, from: now) - 1]
         labels["clock"]?.stringValue = engine.dateKey(now) + "  " + week
-        var status = snapshot.state.rawValue
+        var status = settings.statusPreferences.label(for: snapshot.state)
         let countdown: String
         switch snapshot.state {
         case .beforeWork: countdown = "距上班 " + Engine.duration(snapshot.secondsToNext)
@@ -269,8 +286,10 @@ final class MainView: NSView {
         }
         if settings.mini && reportIsCopied { status = "战报已复制" }
         if settings.mini && !settings.salaryConfigured { status = "示例 · " + status }
-        labels["status"]?.stringValue = status
-        labels["status"]?.textColor = snapshot.state == .overtime ? Theme.orange : Theme.green
+        if let label = labels["status"] {
+            Theme.showStatus(status, in: label)
+            label.textColor = snapshot.state == .overtime ? Theme.orange : Theme.green
+        }
         labels["countdown"]?.stringValue = countdown
         func money(_ value: Double, _ decimals: Int = 2) -> String {
             settings.masked ? "****" : settings.currency + String(format: "%.*f", decimals, value)

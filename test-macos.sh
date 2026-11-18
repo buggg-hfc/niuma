@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p .build/tests
 xcrun swiftc -swift-version 5 -warnings-as-errors \
-  macos/Sources/Settings.swift macos/Sources/Engine.swift macos/Sources/Digits.swift \
+  macos/Sources/Settings.swift macos/Sources/StatusPreferences.swift macos/Sources/Engine.swift macos/Sources/Digits.swift \
   macos/Tests/CoreTests.swift -o .build/tests/core-tests
 .build/tests/core-tests
 if [ "${1:-}" = "--app" ]; then
