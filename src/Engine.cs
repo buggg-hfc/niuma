@@ -17,6 +17,7 @@ namespace NiuMa
         public double OvertimeSeconds;
         public double SecondsToNext;   // 距离下一个节点（上班/下班/午休结束）
         public double Progress;        // 0..1
+        public bool IsHuaweiOvertime;
     }
 
     public static class Engine
@@ -25,7 +26,16 @@ namespace NiuMa
 
         public static bool IsWorkDay(AppSettings s, DateTime date)
         {
+            if (s.SalaryMode == AppSettings.HuaweiSalaryMode)
+                return new HuaweiPayroll(s).Day(date) != HuaweiPayroll.WorkDay.Rest;
             if (s.OverrideMode != 0 && s.OverrideDate == DateKey(date)) return s.OverrideMode == 2;
+            return IsScheduledWorkDay(s, date);
+        }
+
+        internal static bool IsScheduledWorkDay(AppSettings s, DateTime date)
+        {
+            if (s.SalaryMode == AppSettings.HuaweiSalaryMode)
+                return new HuaweiPayroll(s).Day(date, false) != HuaweiPayroll.WorkDay.Rest;
             return s.WorkDaySet()[(int)date.DayOfWeek];
         }
 
@@ -69,12 +79,25 @@ namespace NiuMa
             var r = new Snapshot();
             var sc = GetSched(s);
             double t = (now - now.Date).TotalSeconds;
-            r.DailyPay = s.DailyPay();
+            bool workDay;
+            if (s.SalaryMode == AppSettings.HuaweiSalaryMode)
+            {
+                var payroll = new HuaweiPayroll(s);
+                var day = payroll.Day(now);
+                workDay = day != HuaweiPayroll.WorkDay.Rest;
+                r.IsHuaweiOvertime = day == HuaweiPayroll.WorkDay.MonthEndOvertime;
+                if (workDay) r.DailyPay = payroll.Rates(now).PayFor(day);
+            }
+            else
+            {
+                workDay = IsWorkDay(s, now);
+                r.DailyPay = s.DailyPay();
+            }
             r.PaidSeconds = PaidUntil(sc, 86400);
             double rate = r.PaidSeconds > 0 ? r.DailyPay / r.PaidSeconds : 0;
             r.HourlyPay = rate * 3600;
 
-            if (!IsWorkDay(s, now))
+            if (!workDay)
             {
                 r.State = WorkState.RestDay;
                 return r;
@@ -100,7 +123,7 @@ namespace NiuMa
                 r.Speed = rate;
                 r.SecondsToNext = sc.E - t;
             }
-            else if (s.Overtime)
+            else if (s.Overtime && !r.IsHuaweiOvertime)
             {
                 r.State = WorkState.Overtime;
                 r.OvertimeSeconds = t - sc.E;
@@ -130,32 +153,44 @@ namespace NiuMa
 
         public static double MonthEarned(AppSettings s, DateTime now, double todayEarned)
         {
-            double sum = 0, daily = s.DailyPay();
-            for (var d = new DateTime(now.Year, now.Month, 1); d < now.Date; d = d.AddDays(1))
-                if (IsWorkDay(s, d)) sum += daily;
-            return sum + todayEarned;
+            return MonthPayThrough(s, now, now.Day - 1) + todayEarned;
         }
 
         public static double MonthTotal(AppSettings s, DateTime now)
         {
-            double sum = 0, daily = s.DailyPay();
-            int days = DateTime.DaysInMonth(now.Year, now.Month);
-            for (int i = 1; i <= days; i++)
-                if (IsWorkDay(s, new DateTime(now.Year, now.Month, i))) sum += daily;
+            return MonthPayThrough(s, now, DateTime.DaysInMonth(now.Year, now.Month));
+        }
+
+        static double MonthPayThrough(AppSettings s, DateTime month, int lastDay)
+        {
+            double sum = 0;
+            if (s.SalaryMode == AppSettings.HuaweiSalaryMode)
+            {
+                var payroll = new HuaweiPayroll(s);
+                var rates = payroll.Rates(month);
+                for (int day = 1; day <= lastDay; day++)
+                    sum += rates.PayFor(payroll.Day(new DateTime(month.Year, month.Month, day)));
+                return sum;
+            }
+            double dailyPay = s.DailyPay();
+            for (int day = 1; day <= lastDay; day++)
+                if (IsWorkDay(s, new DateTime(month.Year, month.Month, day))) sum += dailyPay;
             return sum;
         }
 
         public static int DaysToPayDay(AppSettings s, DateTime now)
         {
-            int pd = Math.Max(1, Math.Min(31, s.PayDay));
             var today = now.Date;
-            var target = new DateTime(today.Year, today.Month, Math.Min(pd, DateTime.DaysInMonth(today.Year, today.Month)));
-            if (target < today)
-            {
-                var nm = today.AddMonths(1);
-                target = new DateTime(nm.Year, nm.Month, Math.Min(pd, DateTime.DaysInMonth(nm.Year, nm.Month)));
-            }
+            var target = PayDate(s, today);
+            if (target < today) target = PayDate(s, today.AddMonths(1));
             return (int)(target - today).TotalDays;
+        }
+
+        static DateTime PayDate(AppSettings s, DateTime month)
+        {
+            if (s.SalaryMode == AppSettings.HuaweiSalaryMode) return HuaweiPayroll.PayDate(month);
+            int day = Math.Max(1, Math.Min(DateTime.DaysInMonth(month.Year, month.Month), s.PayDay));
+            return new DateTime(month.Year, month.Month, day);
         }
 
         public static string Duration(double sec, bool withSeconds)

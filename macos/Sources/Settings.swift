@@ -11,6 +11,10 @@ struct AppSettings: Codable, Equatable {
     var salaryMode = 0
     var amount = 100.0
     var monthDays = 21.75
+    var huaweiBaseSalary = 0.0
+    var huaweiPerformanceSalary = 0.0
+    var huaweiAnnualBonus = 0.0
+    var huaweiMonthDays = 0.0
     var startTime = "10:00"
     var endTime = "19:00"
     var lunchEnabled = false
@@ -41,6 +45,7 @@ struct AppSettings: Codable, Equatable {
     var wishlist = "一瓶可乐=3\n一个煎饼果子=8\n一杯奶茶=15\n一份猪脚饭=22\n一杯咖啡=30\n一张电影票=45\n一件T恤=79\n一顿火锅=120\n一双球鞋=399"
     var quotes = "摸鱼不是偷懒，是在给老板省电。\n工资不多，但每一秒都在到账。\n上班是为了下班，下班是为了明天还能上班。\n今天的你，又为老板的新车贡献了一个轮毂。\n别慌，钱在路上，人在工位。\n带薪如厕，是打工人最后的倔强。\n只要我不努力，老板就过不上他想要的生活。\n工作是老板的，命是自己的。\n再坚持一下，离下班又近了一秒。\n今日份的牛马已上线，正在稳定产出。"
 
+    var usesHuaweiPayroll: Bool { salaryMode == 2 }
     var dailyPay: Double { salaryMode == 1 ? (monthDays > 0 ? amount / monthDays : 0) : amount }
     var quoteList: [String] { quotes.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
     var wishItems: [(name: String, price: Double)] {
@@ -66,10 +71,14 @@ struct AppSettings: Codable, Equatable {
         func require(_ condition: Bool, _ message: String) throws {
             if !condition { throw SettingsError(message: message) }
         }
-        try require((0...1).contains(salaryMode), "请选择日薪或月薪")
+        try require((0...2).contains(salaryMode), "请选择日薪、月薪或华为计薪")
         try require(amount.isFinite && (0...1e9).contains(amount), "薪资金额应在 0～10 亿之间")
         try require(monthDays.isFinite && monthDays > 0 && monthDays <= 31, "月计薪天数应大于 0 且不超过 31")
         try require(dailyPay.isFinite && dailyPay <= 1e9, "折算日薪不能超过 10 亿，请检查薪资与月计薪天数")
+        try require([huaweiBaseSalary, huaweiPerformanceSalary, huaweiAnnualBonus].allSatisfy { (0...1e9).contains($0) },
+                    "月基础工资、月绩效工资和年终奖应在 0～10 亿之间")
+        try require(huaweiMonthDays == 0 || (1...31).contains(huaweiMonthDays),
+                    "华为计薪天数应在 1～31 之间，留空或填 0 自动计算")
         guard let start = Self.seconds(startTime), let end = Self.seconds(endTime), end > start else {
             throw SettingsError(message: "上下班时间应为 HH:mm，且下班晚于上班（不支持跨夜班次）")
         }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Windows;
@@ -14,7 +15,10 @@ namespace NiuMa
         readonly AppSettings _orig;
         readonly AppSettings _s;
         readonly MainWindow _main;
+        readonly List<UIElement> _standardSalaryRows = new List<UIElement>();
+        readonly List<UIElement> _huaweiSalaryRows = new List<UIElement>();
         TextBox _name, _amount, _monthDays, _start, _end, _lunchS, _lunchE, _currency, _otRate, _payDay, _wish, _quotes, _bgPath;
+        TextBox _huaweiBasePay, _huaweiPerformancePay, _huaweiAnnualBonus, _huaweiMonthDays;
         ComboBox _mode, _decimals;
         CheckBox _lunch, _topmost, _odometer, _overtime, _notify, _autostart;
         CheckBox[] _days = new CheckBox[7];
@@ -85,7 +89,7 @@ namespace NiuMa
             _row++;
         }
 
-        void Row(string label, UIElement control, string hint = null)
+        void Row(string label, UIElement control, string hint = null, List<UIElement> group = null)
         {
             _grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var l = Ui.T(label, 13, Ui.Sub);
@@ -106,6 +110,7 @@ namespace NiuMa
             ((FrameworkElement)c).Margin = new Thickness(0, 4, 0, 4);
             Grid.SetRow(c, _row); Grid.SetColumn(c, 1);
             _grid.Children.Add(c);
+            if (group != null) { group.Add(l); group.Add(c); }
             _row++;
         }
 
@@ -143,14 +148,25 @@ namespace NiuMa
             _grid.Children.Add(_statusEditor);
 
             Section("薪资");
-            _mode = new ComboBox { Width = 90, SelectedIndex = _s.SalaryMode };
+            _mode = new ComboBox { Width = 90 };
             _mode.Items.Add("日薪"); _mode.Items.Add("月薪");
-            _mode.SelectionChanged += (o, e) => Changed();
+            _mode.Items.Add("华为计薪");
+            _mode.SelectedIndex = _s.SalaryMode >= 0 && _s.SalaryMode < _mode.Items.Count ? _s.SalaryMode : 0;
+            _mode.SelectionChanged += (o, e) => { UpdateSalaryMode(); Changed(); };
             _amount = Box(D(_s.Amount), 110);
             _currency = Box(_s.Currency, 40);
-            Row("薪资", H(_mode, L(""), _amount, L("货币符号"), _currency));
+            Row("计薪方式", H(_mode, L("货币符号"), _currency));
+            Row("薪资金额", H(_amount), group: _standardSalaryRows);
             _monthDays = Box(D(_s.MonthDays), 70);
-            Row("月计薪天数", H(_monthDays, L("天")), "月薪模式下：日薪 = 月薪 ÷ 计薪天数（法定 21.75）");
+            Row("月计薪天数", H(_monthDays, L("天")), "月薪模式下：日薪 = 月薪 ÷ 计薪天数（法定 21.75）", _standardSalaryRows);
+            _huaweiBasePay = Box(_s.HuaweiBasePay.ToString("R", CultureInfo.InvariantCulture), 110);
+            Row("月基础工资", H(_huaweiBasePay), group: _huaweiSalaryRows);
+            _huaweiPerformancePay = Box(_s.HuaweiPerformancePay.ToString("R", CultureInfo.InvariantCulture), 110);
+            Row("月绩效工资", H(_huaweiPerformancePay), group: _huaweiSalaryRows);
+            _huaweiAnnualBonus = Box(_s.HuaweiAnnualBonus.ToString("R", CultureInfo.InvariantCulture), 110);
+            Row("年终奖", H(_huaweiAnnualBonus), "按 12 个月平均计入普通工作日的收入。", _huaweiSalaryRows);
+            _huaweiMonthDays = Box(_s.HuaweiMonthDays > 0 ? _s.HuaweiMonthDays.ToString("R", CultureInfo.InvariantCulture) : "", 70);
+            Row("月计薪天数", H(_huaweiMonthDays, L("天")), "留空或填 0，按当月正常工作日和官方调休自动计算。", _huaweiSalaryRows);
             _preview = Ui.T("", 12, Ui.Blue);
             Row("换算", _preview);
 
@@ -182,7 +198,8 @@ namespace NiuMa
             _otRate = Box(D(_s.OvertimeRate), 50);
             Row("加班", H(_overtime, L("倍率"), _otRate));
             _payDay = Box(_s.PayDay.ToString(), 50);
-            Row("发薪日", H(L("每月"), _payDay, L("号")));
+            Row("发薪日", H(L("每月"), _payDay, L("号")), group: _standardSalaryRows);
+            Row("发薪日", Ui.T("每月 15 日，遇休息日提前到最近的工作日。", 13, Ui.Sub), group: _huaweiSalaryRows);
 
             Section("显示");
             _decimals = new ComboBox { Width = 70 };
@@ -261,11 +278,26 @@ namespace NiuMa
             root.Children.Add(barHost);
             root.Children.Add(scroll);
             Content = root;
+            UpdateSalaryMode();
             UpdatePreview();
         }
+
+        void UpdateSalaryMode()
+        {
+            bool huawei = _mode.SelectedIndex == AppSettings.HuaweiSalaryMode;
+            foreach (var row in _standardSalaryRows) row.Visibility = huawei ? Visibility.Collapsed : Visibility.Visible;
+            foreach (var row in _huaweiSalaryRows) row.Visibility = huawei ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         static bool Num(TextBox t, out double v)
         {
             return double.TryParse(t.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out v);
+        }
+
+        static bool OptionalNumber(TextBox input, out double value)
+        {
+            value = 0;
+            return string.IsNullOrWhiteSpace(input.Text) || Num(input, out value);
         }
 
         // 把界面上的值写入 target，返回错误信息（null 表示全部有效）
@@ -275,10 +307,27 @@ namespace NiuMa
             TimeSpan ts, te;
             t.AppName = _name.Text.Trim().Length == 0 ? "牛马脱敏器" : _name.Text.Trim();
             t.SalaryMode = _mode.SelectedIndex < 0 ? 0 : _mode.SelectedIndex;
-            if (!Num(_amount, out v) || v < 0 || v > 1e9) return "薪资金额不正确";
-            t.Amount = v;
-            if (!Num(_monthDays, out v) || v <= 0 || v > 31) return "月计薪天数应在 1~31 之间";
-            t.MonthDays = v;
+            if (t.SalaryMode == AppSettings.HuaweiSalaryMode)
+            {
+                if (!OptionalNumber(_huaweiBasePay, out v) || !(v >= 0 && v <= 1e9)) return "月基础工资金额不正确";
+                t.HuaweiBasePay = v;
+                if (!OptionalNumber(_huaweiPerformancePay, out v) || !(v >= 0 && v <= 1e9)) return "月绩效工资金额不正确";
+                t.HuaweiPerformancePay = v;
+                if (!OptionalNumber(_huaweiAnnualBonus, out v) || !(v >= 0 && v <= 1e9)) return "年终奖金额不正确";
+                t.HuaweiAnnualBonus = v;
+                if (!OptionalNumber(_huaweiMonthDays, out v) || !(v == 0 || (v >= 1 && v <= 31))) return "月计薪天数应填 0 或 1~31 天";
+                t.HuaweiMonthDays = v;
+            }
+            else
+            {
+                if (!Num(_amount, out v) || v < 0 || v > 1e9) return "薪资金额不正确";
+                t.Amount = v;
+                if (!Num(_monthDays, out v) || v <= 0 || v > 31) return "月计薪天数应在 1~31 之间";
+                t.MonthDays = v;
+                int payDay;
+                if (!int.TryParse(_payDay.Text.Trim(), out payDay) || payDay < 1 || payDay > 31) return "发薪日应在 1~31 之间";
+                t.PayDay = payDay;
+            }
             t.Currency = _currency.Text.Trim();
             if (!AppSettings.TryParseTime(_start.Text, out ts) || !AppSettings.TryParseTime(_end.Text, out te)) return "上下班时间格式应为 HH:mm";
             if (te <= ts) return "下班时间要晚于上班时间";
@@ -300,9 +349,6 @@ namespace NiuMa
             t.Overtime = _overtime.IsChecked == true;
             if (!Num(_otRate, out v) || v < 0 || v > 10) return "加班倍率应在 0~10 之间";
             t.OvertimeRate = v;
-            int pd;
-            if (!int.TryParse(_payDay.Text.Trim(), out pd) || pd < 1 || pd > 31) return "发薪日应在 1~31 之间";
-            t.PayDay = pd;
             t.Decimals = _decimals.SelectedIndex + 2;
             t.Odometer = _odometer.IsChecked == true;
             t.BgOpacity = Math.Round(_bgOp.Value, 2);
@@ -339,6 +385,17 @@ namespace NiuMa
             if (_preview == null) return;
             var tmp = _s.Clone();
             Collect(tmp);
+            if (tmp.SalaryMode == AppSettings.HuaweiSalaryMode)
+            {
+                var now = _main.Now();
+                var rates = new HuaweiPayroll(tmp).Rates(now);
+                string source = tmp.HuaweiMonthDays > 0 ? "手动" : "自动";
+                _preview.Text = "普通日薪 " + tmp.Currency + rates.OrdinaryPay.ToString("F2") +
+                    "  ·  双倍日薪 " + tmp.Currency + rates.OvertimePay.ToString("F2") +
+                    "\n本月计薪天数 " + rates.Days.ToString("0.##") + " 天（" + source + "）";
+                if (!ChinaWorkCalendar.HasYear(now.Year)) _preview.Text += "  ·  暂按每周排班估算";
+                return;
+            }
             double daily = tmp.DailyPay();
             double sec = Engine.PaidSecondsPerDay(tmp);
             double hourly = sec > 0 ? daily / sec * 3600 : 0;
@@ -372,6 +429,10 @@ namespace NiuMa
             _ready = false;
             _name.Text = d.AppName; _mode.SelectedIndex = d.SalaryMode; _amount.Text = D(d.Amount); _currency.Text = d.Currency;
             _monthDays.Text = D(d.MonthDays); _start.Text = d.StartTime; _end.Text = d.EndTime;
+            _s.HuaweiBasePay = d.HuaweiBasePay; _s.HuaweiPerformancePay = d.HuaweiPerformancePay;
+            _s.HuaweiAnnualBonus = d.HuaweiAnnualBonus; _s.HuaweiMonthDays = d.HuaweiMonthDays;
+            _huaweiBasePay.Text = D(d.HuaweiBasePay); _huaweiPerformancePay.Text = D(d.HuaweiPerformancePay);
+            _huaweiAnnualBonus.Text = D(d.HuaweiAnnualBonus); _huaweiMonthDays.Text = "";
             _lunch.IsChecked = d.LunchEnabled; _lunchS.Text = d.LunchStart; _lunchE.Text = d.LunchEnd;
             var set = d.WorkDaySet();
             for (int i = 0; i < 7; i++) _days[i].IsChecked = set[i];

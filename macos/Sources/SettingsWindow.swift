@@ -14,6 +14,8 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
     private var workdays: [NSButton] = []
     private var texts: [String: NSTextView] = [:]
     private let salaryMode = NSPopUpButton()
+    private var standardSalaryRows: [NSView] = []
+    private var huaweiSalaryRows: [NSView] = []
     private let decimals = NSPopUpButton()
     private let errorLabel = Theme.label(12, color: .systemRed)
     private let preview = Theme.label(12, color: Theme.blue)
@@ -45,6 +47,8 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
         field.setAccessibilityLabel(["appName": "软件名称", "amount": "薪资金额", "currency": "货币符号",
                                      "monthDays": "月计薪天数", "startTime": "上班时间", "endTime": "下班时间",
                                      "lunchStart": "午休开始", "lunchEnd": "午休结束", "overtimeRate": "加班倍率",
+                                     "huaweiBaseSalary": "月基础工资", "huaweiPerformanceSalary": "月绩效工资",
+                                     "huaweiAnnualBonus": "年终奖", "huaweiMonthDays": "华为月计薪天数",
                                      "payDay": "发薪日", "bgPath": "背景图片路径"][key] ?? key)
         field.target = self; field.action = #selector(updatePreview(_:))
         field.delegate = self
@@ -140,7 +144,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
         beginPage()
         section("我的收入")
         salaryMode.removeAllItems()
-        salaryMode.addItems(withTitles: ["日薪", "月薪"])
+        salaryMode.addItems(withTitles: ["日薪", "月薪", "华为计薪"])
         salaryMode.selectItem(at: s.salaryMode)
         salaryMode.target = self
         salaryMode.action = #selector(updatePreview(_:))
@@ -148,7 +152,22 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
         salaryMode.setAccessibilityLabel("薪资方式")
         row("薪资", horizontal([salaryMode, field("amount", String(s.amount), width: 145),
                                 ThemeLabel("货币"), field("currency", s.currency, width: 62)]))
+        let salaryOptionsStart = cursor
+        var firstView = form.subviews.count
         row("月计薪天数", field("monthDays", String(s.monthDays)), detail: "月薪 ÷ 计薪天数 = 日薪，默认按 21.75 天折算。")
+        standardSalaryRows = Array(form.subviews.dropFirst(firstView))
+        cursor = salaryOptionsStart
+        firstView = form.subviews.count
+        row("华为月薪", horizontal([ThemeLabel("基础工资"), field("huaweiBaseSalary", String(s.huaweiBaseSalary), width: 115),
+                                   ThemeLabel("绩效工资"), field("huaweiPerformanceSalary", String(s.huaweiPerformanceSalary), width: 115)]))
+        let annualBonus = field("huaweiAnnualBonus", s.huaweiAnnualBonus == 0 ? "" : String(s.huaweiAnnualBonus), width: 115)
+        annualBonus.placeholderString = "选填"
+        annualBonus.toolTip = "年终奖除以 12 计入普通日薪"
+        let huaweiDays = field("huaweiMonthDays", s.huaweiMonthDays == 0 ? "" : String(s.huaweiMonthDays), width: 115)
+        huaweiDays.placeholderString = "自动"
+        huaweiDays.toolTip = "留空或填 0 时，按当月官方节假日与每周工作日计算"
+        row("年终奖与天数", horizontal([ThemeLabel("年终奖"), annualBonus, ThemeLabel("月计薪天数"), huaweiDays]))
+        huaweiSalaryRows = Array(form.subviews.dropFirst(firstView))
         row("计算预览", preview, height: 44)
         preview.identifier = NSUserInterfaceItemIdentifier("calculationPreview")
         section("工作与休息")
@@ -168,7 +187,16 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
         row("加班", horizontal([check("overtime", "下班后继续计薪", s.overtime), ThemeLabel("倍率"),
                                 field("overtimeRate", String(s.overtimeRate), width: 76)]),
             detail: "启用后，工作日从设定的下班时间自动计薪至午夜。")
+        let payDayStart = cursor
+        firstView = form.subviews.count
         row("每月发薪日", field("payDay", String(s.payDay)), detail: "1～31 号，当月没有该日期时按最后一天计算。")
+        standardSalaryRows += form.subviews.dropFirst(firstView)
+        cursor = payDayStart
+        firstView = form.subviews.count
+        let huaweiPayDay = Theme.label(13)
+        huaweiPayDay.stringValue = "15 日"
+        row("每月发薪日", huaweiPayDay, detail: "遇官方休息日，提前至最近的工作日。")
+        huaweiSalaryRows += form.subviews.dropFirst(firstView)
         finishPage(in: root)
 
         beginPage()
@@ -256,16 +284,25 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
 
     private func collect() throws -> AppSettings {
         var result = original
-        func number(_ key: String, _ name: String) throws -> Double {
-            guard let text = fields[key]?.stringValue.trimmingCharacters(in: .whitespaces), let value = Double(text), value.isFinite else {
-                throw SettingsError(message: name + "应为有效数字")
-            }
+        func number(_ key: String, _ name: String, empty: Double? = nil) throws -> Double {
+            let text = fields[key]!.stringValue.trimmingCharacters(in: .whitespaces)
+            if text.isEmpty, let empty = empty { return empty }
+            guard let value = Double(text), value.isFinite else { throw SettingsError(message: name + "应为有效数字") }
             return value
         }
         result.appName = fields["appName"]!.stringValue
         result.salaryMode = salaryMode.indexOfSelectedItem
-        result.amount = try number("amount", "薪资")
-        if result.salaryMode == 1 { result.monthDays = try number("monthDays", "计薪天数") }
+        if result.usesHuaweiPayroll {
+            result.huaweiBaseSalary = try number("huaweiBaseSalary", "月基础工资")
+            result.huaweiPerformanceSalary = try number("huaweiPerformanceSalary", "月绩效工资")
+            result.huaweiAnnualBonus = try number("huaweiAnnualBonus", "年终奖", empty: 0)
+            result.huaweiMonthDays = try number("huaweiMonthDays", "月计薪天数", empty: 0)
+        } else {
+            result.amount = try number("amount", "薪资")
+            if result.salaryMode == 1 { result.monthDays = try number("monthDays", "计薪天数") }
+            guard let payday = Int(fields["payDay"]!.stringValue) else { throw SettingsError(message: "发薪日应为整数") }
+            result.payDay = payday
+        }
         result.currency = fields["currency"]!.stringValue
         result.startTime = fields["startTime"]!.stringValue; result.endTime = fields["endTime"]!.stringValue
         result.lunchEnabled = checks["lunchEnabled"]!.state == .on
@@ -276,8 +313,7 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
         result.workDays = workdays.enumerated().compactMap { $0.element.state == .on ? $0.offset : nil }
         result.overtime = checks["overtime"]!.state == .on
         if result.overtime { result.overtimeRate = try number("overtimeRate", "加班倍率") }
-        guard let payday = Int(fields["payDay"]!.stringValue) else { throw SettingsError(message: "发薪日应为整数") }
-        result.payDay = payday; result.decimals = decimals.indexOfSelectedItem + 2
+        result.decimals = decimals.indexOfSelectedItem + 2
         result.odometer = checks["odometer"]!.state == .on
         result.bgOpacity = sliders["bgOpacity"]!.doubleValue
         result.panelOpacity = sliders["panelOpacity"]!.doubleValue
@@ -292,6 +328,10 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
     }
 
     @objc private func updatePreview(_ sender: Any?) {
+        let usesHuaweiPayroll = salaryMode.indexOfSelectedItem == 2
+        fields["amount"]?.isHidden = usesHuaweiPayroll
+        for view in standardSalaryRows { view.isHidden = usesHuaweiPayroll }
+        for view in huaweiSalaryRows { view.isHidden = !usesHuaweiPayroll }
         fields["monthDays"]?.isEnabled = salaryMode.indexOfSelectedItem == 1
         fields["lunchStart"]?.isEnabled = checks["lunchEnabled"]?.state == .on
         fields["lunchEnd"]?.isEnabled = checks["lunchEnabled"]?.state == .on
@@ -301,11 +341,22 @@ final class SettingsWindow: NSWindowController, NSWindowDelegate, NSTextFieldDel
         }
         do {
             let settings = try collect()
-            let snapshot = Engine().compute(settings, at: Date())
+            let now = Date(), engine = Engine()
             preview.textColor = Theme.green
-            preview.stringValue = String(format: "日薪 %@%.2f · 每天计薪 %.2f 小时\n时薪 %@%.2f · 每秒 %@%.6f",
-                                         settings.currency, settings.dailyPay, snapshot.paidSeconds / 3600,
-                                         settings.currency, snapshot.hourlyPay, settings.currency, snapshot.hourlyPay / 3600)
+            if settings.usesHuaweiPayroll {
+                let payroll = engine.huaweiPayroll
+                let rates = payroll.rates(settings, in: now)
+                let source = settings.huaweiMonthDays > 0 ? "手动" : "自动"
+                let coverage = payroll.hasOfficialSchedule(for: now) ? "" : " · 未收录本年节假日"
+                preview.stringValue = String(format: "普通日薪 %@%.2f · 双倍日薪 %@%.2f\n本月计薪 %.2f 天（%@）%@",
+                                             settings.currency, rates.regular, settings.currency, rates.doubleBase,
+                                             payroll.divisor(settings, in: now), source, coverage)
+            } else {
+                let snapshot = engine.compute(settings, at: now)
+                preview.stringValue = String(format: "日薪 %@%.2f · 每天计薪 %.2f 小时\n时薪 %@%.2f · 每秒 %@%.6f",
+                                             settings.currency, settings.dailyPay, snapshot.paidSeconds / 3600,
+                                             settings.currency, snapshot.hourlyPay, settings.currency, snapshot.hourlyPay / 3600)
+            }
             errorLabel.stringValue = ""
         } catch {
             preview.textColor = .systemRed
